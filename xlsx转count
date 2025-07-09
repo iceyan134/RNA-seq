@@ -1,0 +1,12 @@
+def convert_excel_to_count(input_dir, output_dir):
+    # 遍历输入目录中的所有文件
+    for filename in os.listdir(input_dir):
+        if filename.endswith('.xlsx'):  # 只处理Excel文件
+            file_path = os.path.join(input_dir, filename)
+            # 读取Excel文件
+            df = pd.read_excel(file_path, engine='openpyxl')
+            # 创建输出文件路径
+            output_file_path = os.path.join(output_dir, filename[:-5] + '.txt')  # 假设去掉.xlsx后缀
+            # 将DataFrame保存为tab分隔的文本文件
+            df.to_csv(output_file_path, sep='\t', index=False)
+            print(f"Processed {filename} and saved to {output_file_path}")
