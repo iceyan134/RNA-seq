@@ -1,0 +1,42 @@
+# 1. 读取 count 数据
+count_matrix <- read.delim("genes.counts.matrix", row.names = "gene_id", header = TRUE)
+# 2. 读取样本信息
+samples <- read.delim("samples.txt", row.names = "sample", header = TRUE)
+# 3. 设置 group 为因子
+samples$group <- as.factor(samples$group)
+print(levels(samples$group))  # 应输出 control treatment
+# 4. 构建 DESeqDataSet
+dds <- DESeqDataSetFromMatrix(
+  countData = count_matrix,
+  colData = samples,
+  design = ~ group
+)
+# 5. 运行 DESeq2
+dds <- DESeq(dds)
+# 6. 读取 contrasts.txt
+contrasts_df <- read.delim("contrasts.txt", sep = "\t", header = FALSE, stringsAsFactors = FALSE)
+contrast_levels <- as.character(contrasts_df[1, ])
+print("对比组名：")
+print(contrast_levels)
+# 7. 获取结果
+res <- results(dds, contrast = c("group", contrast_levels[2], contrast_levels[1]))
+# 8. 排序
+resOrdered <- res[order(res$padj), ]
+# 9. 保存结果到 CSV 文件
+write.csv(as.data.frame(resOrdered), "DESeq2_results.csv", row.names = TRUE)
+# 10. 可视化 - 火山图
+res_df <- as.data.frame(resOrdered)
+res_df$sig <- ifelse(res_df$padj < 0.05 & abs(res_df$log2FoldChange) > 1, "Significant", "Not significant")
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = sig)) +
+  geom_point() +
+  labs(title = "Volcano Plot: control vs treatment",
+       x = "log2 Fold Change",
+       y = "-log10(padj)") +
+  theme_minimal() +
+  scale_color_manual(values = c("Significant" = "red", "Not significant" = "black")) +
+  theme(legend.position = "right") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "gray")
+# MA 图
+pdf("ma_plot.pdf")
+plotMA(dds, main = "MA Plot (control vs treatment)", ylim = c(-2, 2))
+dev.off()
