@@ -1,0 +1,71 @@
+# Step 1: 读取数据
+cat("正在读取表达矩阵...\n")
+expr <- as.matrix(read.delim(expr_matrix_file, row.names = "gene_id", check.names = FALSE))
+# 获取样本名
+sample_names <- colnames(expr)
+# Step 2: 并行计算 Pearson 相关性矩阵
+cat("开始并行计算 Pearson 相关性矩阵...\n")
+nc <- ncol(expr)
+cor_matrix <- matrix(nrow = nc, ncol = nc)
+# 判断操作系统（Windows 不支持 fork，要用 socket 集群）
+if (.Platform$OS.type == "unix") {
+  # Linux / macOS 使用 mclapply（多核 fork）
+  cor_func <- function(i) {
+    x <- expr[, i]
+    sapply(seq_len(nc), function(j) {
+      y <- expr[, j]
+      idx <- !is.na(x) & !is.na(y)
+      if (sum(idx) > 0) cor(x[idx], y[idx], method = "pearson") else NA
+    })
+  }
+  res <- mclapply(seq_len(nc), cor_func, mc.cores = detectCores() - 1)
+} else {
+  # Windows 使用集群
+  cl <- makeCluster(detectCores() - 1)
+  clusterExport(cl, varlist = c("expr", "nc"), envir = environment())
+  clusterEvalQ(cl, {
+    library(stats)
+  })
+  cor_func <- function(i) {
+    x <- expr[, i]
+    sapply(seq_len(nc), function(j) {
+      y <- expr[, j]
+      idx <- !is.na(x) & !is.na(y)
+      if (sum(idx) > 0) cor(x[idx], y[idx], method = "pearson") else NA
+    })
+  }
+  res <- parLapply(cl, seq_len(nc), cor_func)
+  stopCluster(cl)
+}
+# 合并结果
+for (i in seq_along(res)) {
+  cor_matrix[, i] <- res[[i]]
+}
+# 对称填充（因为相关性是对称的）
+cor_matrix[upper.tri(cor_matrix)] <- t(cor_matrix)[upper.tri(cor_matrix)]
+rownames(cor_matrix) <- sample_names
+colnames(cor_matrix) <- sample_names
+# Step 3: 绘制热图
+pdf(output_pdf, width = 10, height = 8)
+pheatmap(cor_matrix,
+         main = "Sample Correlation (Pearson)",
+         color = colorRampPalette(c("blue", "white", "red"))(50),
+         clustering_distance_rows = "correlation",
+         clustering_distance_cols = "correlation",
+         annotation_names_row = FALSE,
+         annotation_names_col = FALSE,
+         fontsize = 10,
+         cellwidth = 20,
+         cellheight = 20)
+dev.off()
+pheatmap(cor_matrix,
+         main = "Sample Correlation (Pearson)",
+         color = colorRampPalette(c("blue", "white", "red"))(50),
+         clustering_distance_rows = "correlation",
+         clustering_distance_cols = "correlation",
+         annotation_names_row = FALSE,
+         annotation_names_col = FALSE,
+         fontsize = 10,
+         cellwidth = 20,
+         cellheight = 20)
+dev.off()
