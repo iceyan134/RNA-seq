@@ -1,0 +1,175 @@
+# 加载所需包
+library(DESeq2)
+library(biomaRt)
+library(clusterProfiler)
+library(enrichplot)
+library(org.Mm.eg.db)   # 小鼠注释数据库
+library(ggplot2)
+
+# -----------------------------
+# 1. 获取差异基因（放宽筛选）
+# -----------------------------
+# 假设 res 是 DESeq2 的结果数据框（包含 padj 和 log2FoldChange）
+significant_genes <- subset(res, padj < 0.1 & abs(log2FoldChange) > 0.58)
+sig_gene_ids <- rownames(significant_genes)
+print(paste("显著差异基因数量:", length(sig_gene_ids)))
+
+# -----------------------------
+# 2. 使用 biomaRt 转换 Ensembl ID → Entrez ID
+# -----------------------------
+mart <- useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+converted <- getBM(
+  attributes = c("ensembl_gene_id", "external_gene_name", "entrezgene_id"),
+  filters = "ensembl_gene_id",
+  values = sig_gene_ids,
+  mart = mart
+)
+
+entrez_ids <- na.omit(converted$entrezgene_id)
+print(paste("成功转换为 Entrez ID 的数量:", length(entrez_ids)))
+
+# -----------------------------
+# 3. 获取背景基因（用于富集分析中的 universe）
+# -----------------------------
+background_entrez <- keys(org.Mm.eg.db, keytype = "ENTREZID")
+print(paste("背景基因数量（Entrez ID）:", length(background_entrez)))
+
+# -----------------------------
+# 4. 进行 KEGG 富集分析（使用 Entrez ID）
+# -----------------------------
+if (length(entrez_ids) > 5) {
+  kk <- enrichKEGG(
+    gene         = entrez_ids,
+    organism     = 'mmu',
+    pvalueCutoff = 0.05,
+    qvalueCutoff = 0.05
+  )
+  
+  print(kk)
+  
+  if (!is.null(kk@result)) {
+    
+    dir.create("KEGG_plots", showWarnings = FALSE)
+    
+    # Dot plot - 更多调整：增加宽度 + 字体缩小 + 标签旋转
+    dot_plot <- dotplot(kk, showCategory = 10) +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+        axis.title = element_text(size = 8),
+        legend.position = "right"
+      ) +
+      labs(title = "Dot Plot (Top 10 enriched pathways)")
+    
+    print(dot_plot)
+    ggsave("KEGG_plots/dotplot.png", plot = dot_plot, width = 14, height = 8, dpi = 300)
+    
+    # Bar plot - 横向条形图 + 垂直旋转标签
+    bar_plot <- barplot(kk, showCategory = 10) +
+      theme(
+        axis.text.y = element_text(size = 6),  # y 轴文本
+        axis.title = element_text(size = 8),
+        legend.position = "bottom"
+      ) +
+      labs(title = "Bar Plot (Top 10 enriched pathways)")
+    
+    print(bar_plot)
+    ggsave("KEGG_plots/barplot.png", plot = bar_plot, width = 14, height = 8, dpi = 300)
+    
+    # Cnet plot - 可视化通路与基因关系
+    gene_logfc <- setNames(significant_genes$log2FoldChange, converted$entrezgene_id[match(sig_gene_ids, converted$ensembl_gene_id)])
+    
+    cnet_plot <- cnetplot(kk, showCategory = 15, foldChange = gene_logfc) +
+      theme(
+        axis.text = element_text(size = 8),
+        plot.title = element_text(size = 10)
+      )
+    
+    print(cnet_plot)
+    ggsave("KEGG_plots/cnetplot.png", plot = cnet_plot, width = 14, height = 10, dpi = 300)
+    
+    # 保存结果
+    write.csv(kk@result, "KEGG_enrichment_results.csv", row.names = FALSE)
+    cat("✅ KEGG 分析结果已保存到 KEGG_enrichment_results.csv\n")
+    cat("📊 可视化图表已保存到 KEGG_plots/ 目录下\n")
+    
+  } else {
+    cat("⚠️ 没有显著富集的 KEGG 通路，请尝试进一步放宽筛选\n")
+  }
+} else {
+  cat("❌ Entrez ID 数量太少，无法进行 KEGG 富集分析\n")
+}
+
+# -----------------------------
+# 5. 进行 GO 富集分析（BP/MF/CC）
+# -----------------------------
+go_types <- c("BP", "MF", "CC")  # 生物学过程、分子功能、细胞组分
+
+dir.create("GO_plots", showWarnings = FALSE)
+
+for (ont in go_types) {
+  
+  ego <- enrichGO(
+    gene         = entrez_ids,
+    OrgDb        = org.Mm.eg.db,
+    ont          = ont,
+    pvalueCutoff = 0.05,
+    qvalueCutoff = 0.05,
+    universe     = background_entrez
+  )
+  
+  print(ego)
+  
+  if (!is.null(ego@result)) {
+    
+    # 构建文件名
+    result_file <- paste0("GO_", ont, "_results.csv")
+    dot_plot_file <- paste0("GO_plots/dotplot_GO_", ont, ".png")
+    bar_plot_file <- paste0("GO_plots/barplot_GO_", ont, ".png")
+    cnet_plot_file <- paste0("GO_plots/cnetplot_GO_", ont, ".png")
+    
+    # Dot plot
+    dot_plot_go <- dotplot(ego, showCategory = 10) +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+        axis.title = element_text(size = 8),
+        legend.position = "right"
+      ) +
+      labs(title = paste("Dot Plot (Top 10 enriched GO", ont, ")"))
+    
+    print(dot_plot_go)
+    ggsave(dot_plot_file, plot = dot_plot_go, width = 14, height = 8, dpi = 300)
+    
+    # Bar plot
+    bar_plot_go <- barplot(ego, showCategory = 10) +
+      theme(
+        axis.text.y = element_text(size = 6),
+        axis.title = element_text(size = 8),
+        legend.position = "bottom"
+      ) +
+      labs(title = paste("Bar Plot (Top 10 enriched GO", ont, ")"))
+    
+    print(bar_plot_go)
+    ggsave(bar_plot_file, plot = bar_plot_go, width = 14, height = 8, dpi = 300)
+    
+    # Cnet plot
+    gene_logfc_go <- setNames(significant_genes$log2FoldChange, converted$entrezgene_id[match(sig_gene_ids, converted$ensembl_gene_id)])
+    
+    cnet_plot_go <- cnetplot(ego, showCategory = 15, foldChange = gene_logfc_go) +
+      theme(
+        axis.text = element_text(size = 8),
+        plot.title = element_text(size = 10)
+      )
+    
+    print(cnet_plot_go)
+    ggsave(cnet_plot_file, plot = cnet_plot_go, width = 14, height = 10, dpi = 300)
+    
+    # 保存结果
+    write.csv(ego@result, result_file, row.names = FALSE)
+    cat(paste0("✅ GO(", ont, ") 分析结果已保存到 ", result_file, "\n"))
+    cat(paste0("📊 GO(", ont, ") 图表已保存到 GO_plots/ 目录下\n"))
+    
+  } else {
+    cat(paste0("⚠️ 没有显著富集的 GO(", ont, ") term，请尝试进一步放宽筛选条件\n"))
+  }
+}
