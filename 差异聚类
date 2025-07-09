@@ -1,0 +1,106 @@
+
+library(DESeq2)
+library(pheatmap)
+
+# ----------------------
+# 1. 读取原始 count 数据
+# ----------------------
+file_path <- "E:/RNA/genes.counts.matrix"
+count_data <- read.table(file_path, header = TRUE, row.names = 1, sep = "\t") # 修改为row.names = 1
+
+# ----------------------
+# 2. 创建样本信息 (colData)
+# ----------------------
+# 自动识别 C 组和 T 组
+group_labels <- substr(colnames(count_data), 1, 1)  # 提取 'C' 或 'T'
+sample_info <- data.frame(condition = factor(group_labels))
+rownames(sample_info) <- colnames(count_data)
+
+print("样本分组信息：")
+print(table(sample_info$condition))
+
+# ----------------------
+# 3. 构建 DESeq2 对象并进行差异分析
+# ----------------------
+dds <- DESeqDataSetFromMatrix(
+  countData = count_data,
+  colData = sample_info,
+  design = ~ condition
+)
+
+# 运行 DESeq2
+dds <- DESeq(dds)
+
+# 获取差异结果（T vs C）
+res <- results(dds, contrast = c("condition", "T", "C"))
+
+# 筛选显著差异基因
+significant_genes <- subset(res, padj < 0.05 & abs(log2FoldChange) > 1)
+cat("显著差异基因数量：", nrow(significant_genes), "\n")
+
+# ----------------------
+# 4. 标准化数据用于绘图（正确方式）
+# ----------------------
+normalized_data <- assay(rlog(dds))
+
+# 替换 NA 和 Inf
+normalized_data[is.na(normalized_data) | is.infinite(normalized_data)] <- 0
+
+# 过滤掉所有样本中表达都为 0 的基因（恒为 0 的行）
+filtered_data <- normalized_data[rowSums(normalized_data == 0) < ncol(normalized_data), ]
+
+# 查看前几行
+head(filtered_data)
+
+# ----------------------
+# 5. 绘制双向聚类热图（安全版本）
+# ----------------------
+pheatmap(filtered_data,
+         scale = "row",
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean",
+         clustering_method = "complete",
+         show_rownames = FALSE,
+         annotation_col = sample_info,
+         main = "双向聚类热图 (所有基因)")
+
+## ----------------------
+# 6. 按组别排序并绘制热图（修复完整版）
+# ----------------------
+
+# 再按组别排序
+order <- order(sample_info$condition)
+ordered_data <- filtered_data[, order]
+ordered_sample_info <- sample_info[order, , drop = FALSE]
+
+# 再次过滤恒为 0 的基因
+ordered_filtered_data <- ordered_data[rowSums(ordered_data != 0) > 0, ]
+
+# 最终绘图使用 filtered 后的数据
+pheatmap(ordered_filtered_data,
+         scale = "row",
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean",
+         clustering_method = "complete",
+         show_rownames = FALSE,
+         annotation_col = ordered_sample_info,
+         main = "按组别排序的热图 (C vs T)")
+
+# ----------------------
+# 7. 显著差异基因热图
+# ----------------------
+if (nrow(significant_genes) > 0) {
+  sig_gene_ids <- rownames(significant_genes)
+  sig_data <- normalized_data[sig_gene_ids, ]
+  
+  pheatmap(sig_data,
+           scale = "row",
+           clustering_distance_rows = "euclidean",
+           clustering_distance_cols = "euclidean",
+           clustering_method = "complete",
+           annotation_col = sample_info,
+           show_rownames = FALSE,
+           main = "显著差异基因热图")
+} else {
+  cat("没有找到显著差异基因。\n")
+}
