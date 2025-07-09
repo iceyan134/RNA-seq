@@ -1,0 +1,79 @@
+import os
+import pandas as pd
+
+# -----------------------------
+# Step 1: 解析所有 _expression.txt 文件
+# -----------------------------
+def parse_expression_files(input_dir):
+    """
+    读取 input_dir 中所有 _expression.txt 文件，提取 gene_id 和 expected_count
+    返回合并后的 DataFrame，列为样本名，行为 gene_id
+    """
+    all_data = {}
+
+    for filename in os.listdir(input_dir):
+        if filename.endswith("_expression.txt"):
+            sample_name = filename.replace("_expression.txt", "")
+            file_path = os.path.join(input_dir, filename)
+
+            df = pd.read_csv(file_path, sep='\t')
+            # 使用 gene_id 作为索引，expected_count 作为值
+            all_data[sample_name] = df.set_index('gene_id')['expected_count']
+
+    # 合并所有样本
+    combined_df = pd.DataFrame(all_data)
+    combined_df.reset_index(inplace=True)  # gene_id 变成普通列
+    return combined_df
+
+
+# -----------------------------
+# Step 2: 计算 TPM
+# -----------------------------
+def calculate_tpm(counts_df):
+    """
+    根据 read counts 计算 TPM
+    :param counts_df: 来自 parse_expression_files 的 DataFrame
+    :return: TPM 矩阵 DataFrame
+    """
+    gene_ids = counts_df['gene_id']
+    counts = counts_df.drop(columns=['gene_id'])
+    
+    # Step 1: 读取任意一个 _expression.txt 获取 transcript_length
+    example_file = None
+    for filename in os.listdir(input_dir):
+        if filename.endswith("_expression.txt"):
+            example_file = os.path.join(input_dir, filename)
+            break
+
+    length_df = pd.read_csv(example_file, sep='\t')[['gene_id', 'transcript_length']]
+    lengths = length_df.set_index('gene_id')['transcript_length']
+    lengths = lengths.reindex(gene_ids).values.reshape(-1, 1)  # 转为 numpy 向量
+
+    # Step 2: 每个样本做 TPM 转换
+    tpm_matrix = pd.DataFrame(index=gene_ids)
+
+    for col in counts.columns:
+        cpm = (counts[col].values / lengths.flatten()) * 1000  # RPK
+        scaling_factor = cpm.sum() / 1e6  # per million
+        tpm = cpm / scaling_factor
+        tpm_matrix[col] = tpm
+
+    tpm_matrix.reset_index(inplace=True)
+    return tpm_matrix
+
+
+# -----------------------------
+# 主程序入口
+# -----------------------------
+if __name__ == "__main__":
+    input_dir = "E:/RNA"  # 替换为你的实际路径
+    output_counts_matrix = "output_counts.tsv"
+    output_tpm_matrix = "output_tpm.tsv"
+
+    def main():
+        counts_df = parse_expression_files(input_dir)
+        counts_df.to_csv(output_counts_matrix, sep='\t', index=False)
+        tpm_df = calculate_tpm(counts_df)
+        tpm_df.to_csv(output_tpm_matrix, sep='\t', index=False)
+
+    main()
