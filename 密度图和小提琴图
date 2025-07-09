@@ -1,0 +1,19 @@
+# 绘制小提琴图
+p_violin <- ggplot(merged_data, aes(x = sample, y = log_TPM, fill = group)) +
+  geom_violin(trim = FALSE, alpha = 0.6) +
+  labs(title = "log10(TPM + 1) Distribution by Group - Violin Plot",
+       x = "Sample", y = "log10(TPM)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+print(p_violin)
+# 绘制密度图
+p_density <- ggplot(merged_data, aes(x = log_TPM, color = group, fill = group)) +
+  geom_density(alpha = 0.6) +
+  coord_cartesian(xlim = c(-3, 3)) + # 设置x轴范围从-3到3
+  labs(
+    title = "Density Distribution of log10(TPM + 1) by Group",
+    x = "log10(TPM)",
+    y = "Density"
+  ) +
+  theme_minimal() 
+print(p_density)
