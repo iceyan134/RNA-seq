@@ -1,0 +1,59 @@
+# 加载必要的库
+library(ggplot2)
+library(readr)
+
+# 设置工作目录（可选）
+setwd("E:/RNA")
+
+# 读取 TPM 数据
+tpm_file <- "genes.TPM.EXPR.matrix"
+data <- read_delim(tpm_file, delim = "\t", escape_double = FALSE, trim_ws = TRUE)
+
+# 查看前几行数据
+head(data)
+
+# 移除 gene_id 列，并转换为矩阵（行为基因，列为样本）
+expr_matrix <- as.matrix(data[, -1])
+
+# 检查是否有缺失值并替换为 0
+expr_matrix[is.na(expr_matrix)] <- 0
+
+# 对数据进行 log2 转换（加一个小常数避免零值）
+log_expr_matrix <- log2(expr_matrix + 1)
+
+# 筛选有变化的基因：保留至少在一个样本中表达大于 1 的基因
+keep_gene <- rowSums(log_expr_matrix > 1) >= 1  # 至少在一个样本中 log2(TPM+1) > 1
+filtered_log_expr_matrix <- log_expr_matrix[keep_gene, ]
+
+# 转置矩阵，以便对样本进行 PCA（行为样本，列为基因）
+t_log_expr_matrix <- t(filtered_log_expr_matrix)
+
+# 执行 PCA（基于样本进行降维）
+pca_result <- prcomp(t_log_expr_matrix, scale. = TRUE)
+
+# 提取 PCA 结果
+pca_data <- as.data.frame(pca_result$x)
+
+# 获取样本名并定义分组
+sample_names <- colnames(data)[-1]  # 所有样本名（C_1, T_1 等）
+group_labels <- ifelse(grepl("^C_", sample_names), "Control", "Treatment")
+
+# 将分组信息添加到 PCA 结果中
+pca_data$group <- factor(group_labels)
+
+# 可视化：PC1 vs PC2
+ggplot(pca_data, aes(x = PC1, y = PC2, color = group)) +
+  geom_point(size = 4) +
+  labs(title = "PCA of Samples (log2-scaled TPM)",
+       x = paste0("PC1 (", round(summary(pca_result)$importance[2,1]*100, 2), "% variance)"),
+       y = paste0("PC2 (", round(summary(pca_result)$importance[2,2]*100, 2), "% variance)")) +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = "right")
+
+# 保存图像（可选）
+ggsave("PCA_plot_samples.png", width = 8, height = 6, dpi = 300)
+
+# 保存 PCA 得分（可用于后续分析）
+write.csv(pca_data, "PCA_scores_samples.csv", row.names = TRUE)
